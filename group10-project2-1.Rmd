@@ -1,0 +1,366 @@
+---
+title: "group10-project2"
+output: html_document
+---
+
+### Imports
+```{r}
+library(dplyr)
+library(tidyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(ggraph)
+library(igraph)
+library(RColorBrewer)
+```
+
+### Task 1
+#### Reading DataFrame
+```{r}
+keywords <- read.csv('Keyword_data.csv')
+keywords <- data.frame(lapply(keywords, str_to_title))
+```
+
+#### Converting to Adjacency Matrix
+```{r}
+# Stack all variables to find unique
+stack_keywords <- stack(keywords)
+# Calculate unique keywords
+unique_keywords <- unique(stack_keywords$values)
+# Create a weighted adjacency matrix
+answer <- matrix(0, nrow=length(unique_keywords), ncol=length(unique_keywords))
+colnames(answer) <- unique_keywords
+rownames(answer) <- unique_keywords
+# Logic to create weighted matrix
+for(i in 1:length(keywords$Keyword.2)){
+  temp <- unlist(keywords[i,])
+  temp <- temp[!is.na(temp)]
+  temp <- temp[temp != ""]
+  keyword_list <- combn(temp,2)
+  for(j in 1:length(keyword_list[1,])){
+    rowind <- which(rownames(answer) == (keyword_list[1,j]))
+    colind <- which(colnames(answer) == (keyword_list[2,j]))
+    answer[rowind,colind] <- answer[rowind,colind]+1
+    answer[colind,rowind] <- answer[colind,rowind]+1
+  }
+}
+```
+
+#### Converting to Network
+```{r}
+net <- graph_from_adjacency_matrix(answer, weighted = TRUE)
+```
+
+#### Top 10 Degrees
+```{r}
+degrees <- degree(net, mode='all')
+top_10_degrees <- head(sort(degrees, decreasing = T), 10)
+top_10_degrees
+```
+
+#### Top 10 Strengths
+```{r}
+strengths <- strength(net, mode='all')
+top_10_strengths <- head(sort(strengths, decreasing = T), 10)
+top_10_strengths
+```
+
+#### Top 10 Node Pairs by Weight
+```{r}
+node_pairs <- get.data.frame(net)
+node_pairs <- node_pairs[order(-node_pairs$weight),]
+head(node_pairs, 10)
+```
+#### Plotting Average Strength vs Degree
+```{r}
+averageWeight <- tapply(strengths, degrees, mean)
+averageWeight <- data.frame(averageWeight)
+avgWt_vs_deg <- cbind(degree=rownames(averageWeight), averageWeight)
+row.names(avgWt_vs_deg) <- NULL
+```
+
+```{r}
+plot(avgWt_vs_deg, type='p', pch = 1, main='Average Strength vs Degree', xlab='Degree', ylab='Average Strength')
+lines(lowess(avgWt_vs_deg$degree, avgWt_vs_deg$averageWeight), col = "blue")
+```
+
+### Task 2
+#### Reading csv file and stopwords
+```{r}
+twitter_df <- read.csv('2021.csv',header=T)
+twitter_df$date <- strptime(twitter_df$date, format='%Y-%m-%d  %H:%M:%S') # converting date column
+twitter_df$year <- format(twitter_df$date,"%Y") # adding year column
+twitter_df <- twitter_df %>% 
+                filter(language=='en', year %in% c("2017", "2018", "2019", "2020", "2021")) 
+                # filtering by year greater than 2017 and language by English 
+
+tweets_df <- data.frame(year=twitter_df$year, tweet=twitter_df$tweet)
+
+stopwords <- read.table('stopwords.txt')
+```
+
+#### Cleaning Data
+```{r}
+tweets_df$tweet <- str_to_lower(tweets_df$tweet) # converting strings to lower case
+tweets_df$tweet <- gsub("@\\w+", "", tweets_df$tweet) # removing mentions
+tweets_df$tweet <- gsub("[[:digit:]]", "", tweets_df$tweet) # removing numbers
+
+words_df <- tweets_df %>%
+            unnest_tokens(word, tweet) %>% # tokennizing words
+            filter(!word %in% stopwords$V1, # removing stopwords
+                   !word %in% c("https", "t.co", "amp"), # removing urls and links
+                   !grepl("^\\d+\\w\\d*", word),
+                   !grepl("[^\x01-\x7F]+", word)) %>% 
+            count(year, word, sort=T) # computing word count per year
+```
+
+#### Computing Word Frequencies
+```{r}
+total_words <- words_df%>% 
+                  group_by(year) %>% 
+                  summarize(total_words = sum(n))
+
+words_df <- left_join(words_df, total_words)
+words_df$frequency <- words_df$n/words_df$total_words # calculating word frequencies
+```
+
+#### Top 10 Words by Year
+```{r}
+year_df <- data.frame(year=numeric(0), word=character(0), frequency=numeric(0))
+for (i in 2017:2021){
+  temp_df <- head(subset(words_df, year==i),10)
+  temp_df <- temp_df[, !names(temp_df) %in% c('n','total_words')]
+  year_df <- rbind(year_df, temp_df)
+}
+```
+
+##### Year 2017
+```{r}
+filter(year_df, year==2017)
+```
+##### Year 2018
+```{r}
+filter(year_df, year==2018)
+```
+
+##### Year 2019
+```{r}
+filter(year_df, year==2019)
+```
+
+##### Year 2020
+```{r}
+filter(year_df, year==2020)
+```
+
+##### Year 2021
+```{r}
+filter(year_df, year==2021)
+```
+#### Plotting Histograms of frequencies per year
+##### Year 2017
+```{r}
+df2017 <- filter(words_df, year==2017)
+
+ggplot(df2017, aes(frequency, fill = word)) +
+  geom_histogram(show.legend = FALSE, bins=100) +
+  xlim(NA, 0.02)
+```
+
+##### Year 2018
+```{r}
+df2018 <- filter(words_df, year==2018)
+
+ggplot(df2018, aes(frequency, fill = word)) +
+  geom_histogram(show.legend = FALSE, bins=100) +
+  xlim(NA, 0.025)
+```
+
+##### Year 2019
+```{r}
+df2019 <- filter(words_df, year==2019)
+
+ggplot(df2019, aes(frequency, fill = word)) +
+  geom_histogram(show.legend = FALSE, bins=100) +
+  xlim(NA, 0.02)
+```
+
+##### Year 2020
+```{r}
+df2020 <- filter(words_df, year==2020)
+
+ggplot(df2020, aes(frequency, fill = word)) +
+  geom_histogram(show.legend = FALSE, bins=100) +
+  xlim(NA, 0.02)
+```
+
+##### Year 2021
+```{r}
+df2021 <- filter(words_df, year==2021)
+
+ggplot(df2021, aes(frequency, fill = word)) +
+  geom_histogram(show.legend = FALSE, bins=100) +
+  xlim(NA, 0.02)
+```
+
+#### Zipf’s Law / log-log plots of word frequencies and rank
+```{r}
+freq_by_rank <- words_df %>% 
+  group_by(year) %>% 
+  mutate(rank = row_number(), 
+         `term frequency` = frequency) %>%
+  ungroup()
+
+cols <- brewer.pal(5, "Spectral")
+
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = year)) + 
+  geom_line(size = 1.1, alpha = 0.8, show.legend = T) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_color_manual(values = cols)
+```
+
+#### Creating Bigrams
+##### Reading DataFrame again
+```{r}
+twitter_bigram_df <- read.csv('2021.csv',header=T)
+twitter_bigram_df$date <- strptime(twitter_bigram_df$date, format='%Y-%m-%d  %H:%M:%S') 
+twitter_bigram_df$year <- format(twitter_bigram_df$date,"%Y") 
+twitter_bigram_df <- twitter_bigram_df %>% 
+                filter(language=='en', year %in% c("2017", "2018", "2019", "2020", "2021")) 
+
+tweets_bigram_df <- data.frame(year=twitter_bigram_df$year, tweet=twitter_bigram_df$tweet)
+
+tweets_bigram_df$tweet <- str_to_lower(tweets_bigram_df$tweet) # converting strings to lower case
+tweets_bigram_df$tweet <- gsub("@\\w+", "", tweets_bigram_df$tweet) # removing mentions
+tweets_bigram_df$tweet <- gsub("[[:digit:]]", "", tweets_bigram_df$tweet) # removing numbers
+```
+
+##### Creating Bigrams DataFrame
+```{r}
+bigrams_df <- tweets_bigram_df %>%
+            unnest_tokens(bigram, tweet, token = "ngrams", n = 2) 
+```
+
+##### Cleaning the data
+```{r}
+bigrams_df <- bigrams_df %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_df <- bigrams_df %>%
+                filter( !word1 %in% c("https", "t.co", "amp"), 
+                        !word2 %in% c("https", "t.co", "amp"),
+                        !grepl("^\\d+\\w\\d*", word1),
+                        !grepl("[^\x01-\x7F]+", word1),
+                        !grepl("^\\d+\\w\\d*", word2),
+                        !grepl("[^\x01-\x7F]+", word2))
+
+bigrams_df <- bigrams_df %>%
+                filter(!word1 %in% stopwords$V1) %>%
+                filter(!word2 %in% stopwords$V1)
+```
+
+##### Counting Bigrams
+```{r}
+bigrams_df <- bigrams_df %>% 
+                count(year, word1, word2, sort = T)
+
+bigrams_df <- bigrams_df[complete.cases(bigrams_df),]
+```
+
+##### Year 2017
+```{r}
+df2017 <- filter(bigrams_df, year==2017)
+df2017 <- df2017[,2:4]
+
+bigram_graph <- df2017 %>%
+  filter(n > 2) %>% # filtering pairs with frequency less than 3
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.05, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+##### Year 2018
+```{r}
+df2018 <- filter(bigrams_df, year==2018)
+df2018 <- df2018[,2:4]
+
+bigram_graph <- df2018 %>%
+  filter(n > 3) %>% # filtering pairs with frequency less than 4
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.05, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+##### Year 2019
+```{r}
+df2019 <- filter(bigrams_df, year==2019)
+df2019 <- df2019[,2:4]
+
+bigram_graph <- df2019 %>%
+  filter(n > 3) %>%  # filtering pairs with frequency less than 4
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.05, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+##### Year 2020
+```{r}
+df2020 <- filter(bigrams_df, year==2020)
+df2020 <- df2020[,2:4]
+
+bigram_graph <- df2020 %>%
+  filter(n > 3) %>%  # filtering pairs with frequency less than 4
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.05, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+##### Year 2021
+```{r}
+df2021 <- filter(bigrams_df, year==2021)
+df2021 <- df2021[,2:4]
+
+bigram_graph <- df2021 %>%
+  filter(n > 1) %>%  # filtering pairs with frequency less than 1
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.05, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
